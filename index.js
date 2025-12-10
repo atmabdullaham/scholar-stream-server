@@ -119,12 +119,13 @@ async function run() {
     // 1.  Save scholarship
     app.post('/scholarships', async(req,res)=>{
         const scholarshipInfo = req.body
+        scholarshipInfo.reviews = []
         scholarshipInfo.scholarshipPostDate = new Date()
         const result = await scholarshipsCollection.insertOne(scholarshipInfo)
         res.send(result)
     })
 
-    // 2. get scholarships
+    // 2. get all scholarships
      app.get("/scholarships", async (req, res) => {
   try {
     let {
@@ -192,6 +193,29 @@ async function run() {
         const result = await scholarshipsCollection.deleteOne(query)
         res.send(result)
     })
+
+    // 4. get one scholarship
+    app.get("/scholarships/:id", async(req, res)=>{
+        const id = req.params.id;
+        const query = {_id: new ObjectId(id)}
+        const result = await scholarshipsCollection.findOne(query)
+        res.send(result)
+    })
+    // 5. Update one scholarship 
+    app.patch("/scholarships/:id", async (req, res) => {
+      const id = req.params.id;
+      const data = req.body;   
+       try {
+        const query = { _id: new ObjectId(id) };
+        const updatedDoc = {
+            $set: data, 
+            };
+        const result = await scholarshipsCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ message: "Update failed", error: err });
+        }
+    });
 
     
      

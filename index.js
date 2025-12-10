@@ -17,7 +17,7 @@ app.use(express.json())
 
 const imgkitClient = new ImageKit(
     {
-    publicKey : "public_9ZiMp/MhVuE8NR/DGLRM9LRbiV0=",
+    publicKey : process.env.IMAGEKIT_PUBLIC_KEY,
     privateKey : process.env.IMAGEKIT_PRIVATE_KEY,
     urlEndpoint : "https://ik.imagekit.io/atm"  
 });
@@ -121,6 +121,75 @@ async function run() {
         const scholarshipInfo = req.body
         scholarshipInfo.scholarshipPostDate = new Date()
         const result = await scholarshipsCollection.insertOne(scholarshipInfo)
+        res.send(result)
+    })
+
+    // 2. get scholarships
+     app.get("/scholarships", async (req, res) => {
+  try {
+    let {
+      limit = 12,
+      skip = 0,
+      sort = "createdAt",
+      order = "desc",
+      search = "",
+      category = ""    
+    } = req.query;
+
+    limit = Number(limit);
+    skip = Number(skip);
+
+    // BUILD QUERY
+    let query = {};
+
+    // CATEGORY FILTER
+    if (category) {
+      query.scholarshipCategory = category;
+    }
+
+    // TEXT SEARCH
+    if (search) {
+      query.$or = [
+        { scholarshipName: { $regex: search, $options: "i" } },
+        { universityName: { $regex: search, $options: "i" } },
+        { degree : { $regex: search, $options: "i" } }
+      ];
+    }
+
+    // SORT
+    const sortOption = {};
+    sortOption[sort] = order === "asc" ? 1 : -1;
+
+    // DATA FETCH
+    const data = await scholarshipsCollection
+      .find(query)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    const total = await scholarshipsCollection.countDocuments(query);
+
+    res.send({
+      success: true,
+      data,
+      total,
+      limit,
+      currentPage: skip / limit,
+      totalPage: Math.ceil(total / limit)
+    });
+
+  } catch (error) {
+    console.log("API ERROR:", error);
+    res.status(500).send({ success: false, error: "Server error" });
+  }
+        });  
+
+    // 3. delete scholarships
+    app.delete("/scholarships/:id", async(req, res)=>{
+        const id = req.params.id;
+        const query = {_id: new ObjectId(id)}
+        const result = await scholarshipsCollection.deleteOne(query)
         res.send(result)
     })
 

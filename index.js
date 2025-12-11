@@ -3,6 +3,7 @@ const cors = require('cors');
 const ImageKit = require('@imagekit/nodejs');   
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
+const stripe = require('stripe')(process.env.STRIPE_SECRET)
 
 
 const app = express()
@@ -60,6 +61,7 @@ async function run() {
      const database = client.db('scholar_stream');
      const usersCollection  = database.collection('users');
      const scholarshipsCollection  = database.collection('scholarships');
+     const applicationsCollection = database.collection('applications')
      
       //$  users related apis
      // _________________________________________________________________________
@@ -115,8 +117,8 @@ async function run() {
    })
 
       //$ scholarships related apis
-     //__________________________________________________
-    // 1.  Save scholarship
+     //___________________________________________________________________________
+    // 1. Scholarship Save to Database
     app.post('/scholarships', async(req,res)=>{
         const scholarshipInfo = req.body
         scholarshipInfo.reviews = []
@@ -124,9 +126,8 @@ async function run() {
         const result = await scholarshipsCollection.insertOne(scholarshipInfo)
         res.send(result)
     })
-
-    // 2. get all scholarships
-     app.get("/scholarships", async (req, res) => {
+    // 2. Scholarships get all from db
+    app.get("/scholarships", async (req, res) => {
   try {
     let {
       limit = 12,
@@ -134,7 +135,8 @@ async function run() {
       sort = "createdAt",
       order = "desc",
       search = "",
-      category = ""    
+      category = "",
+      degree = ""  
     } = req.query;
 
     limit = Number(limit);
@@ -146,6 +148,9 @@ async function run() {
     // CATEGORY FILTER
     if (category) {
       query.scholarshipCategory = category;
+    }
+    if(degree){
+        query.degree = degree
     }
 
     // TEXT SEARCH
@@ -185,15 +190,13 @@ async function run() {
     res.status(500).send({ success: false, error: "Server error" });
   }
         });  
-
-    // 3. delete scholarships
+    // 3. Scholarship Delete
     app.delete("/scholarships/:id", async(req, res)=>{
         const id = req.params.id;
         const query = {_id: new ObjectId(id)}
         const result = await scholarshipsCollection.deleteOne(query)
         res.send(result)
     })
-
     // 4. get one scholarship
     app.get("/scholarships/:id", async(req, res)=>{
         const id = req.params.id;
@@ -217,6 +220,50 @@ async function run() {
         }
     });
 
+        // $ payment related api
+       //  ___________________________________________________________________
+      //1. create payment session
+          app.post("/create-checkout-session", async(req, res)=>{
+               const applicationInfo = req.body;
+               const userEmail = applicationInfo.userEmail;
+               const userQuery = {email: userEmail};
+               const userResult = await usersCollection.findOne(userQuery);
+               applicationInfo.userId = userResult._id.toString();
+               applicationInfo.userName = userResult.displayName;
+               applicationInfo.applicationStatus = "pending";
+               applicationInfo.paymentStatus = "unpaid";
+               applicationInfo.applicationDate = new Date()
+               applicationInfo.feedback = ""
+              //  a conditin needed to prevent send it database, reather a message send to front that you already applied for this application
+               const saveApplicationInfo = await applicationsCollection.insertOne(applicationInfo)
+               const applicationId = saveApplicationInfo.insertedId.toString()
+               const totalPayable = applicationInfo.applicationFees + applicationInfo.serviceCharge
+               const amount = parseInt(totalPayable)*100;
+              //  creating Sessions if unpaid or new application
+               const session = await stripe.checkout.sessions.create({
+         line_items: [
+          {
+            price_data:{
+            currency:'usd',
+            unit_amount:amount,
+              product_data: {
+              name: `Please pay, to apply for:${applicationInfo.degree} in ${applicationInfo.universityName}`
+              }
+            },
+           quantity: 1,
+          },
+        ],
+        mode: 'payment',
+        metadata: {
+          applicationId,
+          applicationName: applicationInfo.applicationName
+        },
+        customer_email: applicationInfo.userEmail,
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+      })
+      res.send({url:session.url})
+    }) 
     
      
     await client.db("admin").command({ ping: 1 });

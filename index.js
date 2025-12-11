@@ -256,7 +256,9 @@ async function run() {
         mode: 'payment',
         metadata: {
           applicationId,
-          applicationName: applicationInfo.applicationName
+          universityName: applicationInfo.universityName,
+          scholarshipCategory: applicationInfo.scholarshipCategory,
+          degree: applicationInfo.degree
         },
         customer_email: applicationInfo.userEmail,
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
@@ -264,6 +266,53 @@ async function run() {
       })
       res.send({url:session.url})
     }) 
+    // 2. payment success update the payment status unpaid to paid.
+    app.patch("/application-payment-success", async(req,res)=>{
+      const sessionId = req.query.session_id;
+      const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ['line_items']
+    });
+    const amountPaid = session.amount_total;  
+    const currency = session.currency;     
+      const scholarshipDetails = session.metadata;
+      const transactionId = session.payment_intent;
+      const paymentExist = await applicationsCollection.findOne({ transactionId });
+      
+    if (paymentExist) {
+      return res.send({
+        message: "already exists",
+        transactionId,
+        trackingId: paymentExist.trackingId,
+      });
+    }
+
+    if (session.payment_status !== "paid") {
+      return res.send({ success: false });
+    }
+
+    // Update application payment status
+    const applicationId = session.metadata.applicationId;
+    const result = await applicationsCollection.updateOne(
+      { _id: new ObjectId(applicationId) },
+      { $set: { 
+             paymentStatus: "paid",
+             transactionId: transactionId,
+             paidAt: new Date()
+            } }
+    );
+
+   
+
+    return res.send({
+      success: true,
+      transactionId,
+      result,
+      scholarshipDetails,
+      amountPaid,
+      currency
+    });
+      res.send({success: false})
+    })
     
      
     await client.db("admin").command({ ping: 1 });

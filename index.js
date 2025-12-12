@@ -266,6 +266,7 @@ async function run() {
       })
       res.send({url:session.url})
     }) 
+
     // 2. payment success update the payment status unpaid to paid.
     app.patch("/application-payment-success", async(req,res)=>{
       const sessionId = req.query.session_id;
@@ -313,6 +314,86 @@ async function run() {
     });
       res.send({success: false})
     })
+
+         //$ application management
+        // 1. applications get all from db
+    app.get("/applications", async (req, res) => {
+  try {
+    let {
+      limit = 12,
+      skip = 0,
+      sort = "createdAt",
+      order = "desc",
+      search = "",
+      applicationStatus = "",
+      degree = ""  
+    } = req.query;
+
+    limit = Number(limit);
+    skip = Number(skip);
+
+    // BUILD QUERY
+    let query = {};
+
+    // CATEGORY FILTER
+    if (applicationStatus) {
+      query.applicationStatus = applicationStatus;
+    }
+    if(degree){
+        query.degree = degree
+    }
+
+    // TEXT SEARCH
+    if (search) {
+      query.$or = [
+        { universityName: { $regex: search, $options: "i" } },
+        { degree : { $regex: search, $options: "i" } }
+      ];
+    }
+
+    // SORT
+    const sortOption = {};
+    sortOption[sort] = order === "asc" ? 1 : -1;
+
+    // DATA FETCH
+    const data = await applicationsCollection
+      .find(query)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    const total = await applicationsCollection.countDocuments(query);
+
+    res.send({
+      success: true,
+      data,
+      total,
+      limit,
+      currentPage: skip / limit,
+      totalPage: Math.ceil(total / limit)
+    });
+
+  } catch (error) {
+    console.log("API ERROR:", error);
+    res.status(500).send({ success: false, error: "Server error" });
+  }
+        });
+
+        // 2. Update application
+        app.patch("/applications/:id", async(req, res)=>{
+          const id = req.params.id;
+          const updateInfo = req.body;
+          const query = {_id: new ObjectId(id)}
+          const updatedDoc = {
+            $set: 
+              updateInfo
+            
+          }
+
+          const result = await applicationsCollection.updateOne(query, updatedDoc)
+          res.send(result)
+        })
     
      
     await client.db("admin").command({ ping: 1 });

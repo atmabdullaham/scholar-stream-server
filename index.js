@@ -62,6 +62,7 @@ async function run() {
      const usersCollection  = database.collection('users');
      const scholarshipsCollection  = database.collection('scholarships');
      const applicationsCollection = database.collection('applications')
+     const reviewsCollection = database.collection('reviews')
     
      
 
@@ -234,11 +235,20 @@ async function run() {
         }
     });
 
+
+
         // $ payment related api
        //  ___________________________________________________________________
       //1. create payment session
+   
+
+
+    // paymet checkout session link
+    //1. create payment session
           app.post("/create-checkout-session", async(req, res)=>{
                const applicationInfo = req.body;
+               let applicationId = "";
+               if(!applicationInfo._id){
                const userEmail = applicationInfo.userEmail;
                const userQuery = {email: userEmail};
                const userResult = await usersCollection.findOne(userQuery);
@@ -249,9 +259,16 @@ async function run() {
                applicationInfo.applicationDate = new Date()
                applicationInfo.feedback = ""
               //  a conditin needed to prevent send it database, reather a message send to front that you already applied for this application
-               const saveApplicationInfo = await applicationsCollection.insertOne(applicationInfo)
-               const applicationId = saveApplicationInfo.insertedId.toString()
-               const totalPayable = applicationInfo.applicationFees + applicationInfo.serviceCharge
+               if(!applicationId){
+                const saveApplicationInfo = await applicationsCollection.insertOne(applicationInfo)
+                applicationId = saveApplicationInfo.insertedId.toString()
+               }
+               }
+               if(applicationInfo._id){
+                applicationId = applicationInfo._id.toString()
+               }
+              
+               const totalPayable =  Number(applicationInfo.applicationFees) + Number(applicationInfo.serviceCharge)
                const amount = parseInt(totalPayable)*100;
               //  creating Sessions if unpaid or new application
                const session = await stripe.checkout.sessions.create({
@@ -457,6 +474,29 @@ async function run() {
             res.status(500).send({ success: false, error: "Server error" });
           }
         });
+        // 4. delete my applications
+        app.delete("/my-applications/:id", async(req,res)=>{
+          const id = req.params.id;
+        const query = {_id: new ObjectId(id)}
+        const result = await applicationsCollection.deleteOne(query)
+        res.send(result)
+        })
+
+
+        // ________________________________________________
+        // submit review
+        app.post("/reviews", async(req, res)=>{
+          const reviewInfo = req.body;
+          reviewInfo.reviewDate = new Date()
+          const existReviewForScholarship = await reviewsCollection.findOne({scholarshipId: reviewInfo.scholarshipId})
+            if (existReviewForScholarship) {
+              return res.status(409).send({
+              message: "You have already reviewed this scholarship",
+                   });
+           }
+          const result = await reviewsCollection.insertOne(reviewInfo)
+          res.send(result)
+        })
      
      
     await client.db("admin").command({ ping: 1 });

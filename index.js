@@ -497,6 +497,58 @@ async function run() {
           const result = await reviewsCollection.insertOne(reviewInfo)
           res.send(result)
         })
+        // get all review
+
+
+app.get("/reviews/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const reviews = await reviewsCollection.find({ userEmail: email }).toArray();
+    if (reviews.length === 0) return res.send([]);
+    const scholarshipIds = reviews.map(r =>new ObjectId(r.scholarshipId));
+    const scholarships = await scholarshipsCollection
+      .find({ _id: { $in: scholarshipIds } })
+      .project({ _id: 1, scholarshipName: 1 })
+      .toArray();
+    const reviewsWithNames = reviews.map(r => {
+      const scholarship = scholarships.find(
+        s => s._id.toString() === r.scholarshipId.toString()
+      );
+      return {
+        ...r,
+        scholarshipName: scholarship ? scholarship.scholarshipName : "",
+      };
+    });
+    res.send(reviewsWithNames);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+// delete 
+app.delete("/reviews/:id", async(req, res)=>{
+  const id = req.params.id;
+  const query = {_id: new ObjectId(id)}
+  const result = await reviewsCollection.deleteOne(query)
+  res.send(result)
+})
+app.patch("/reviews/:id", async (req, res) => {
+  const { id } = req.params;
+  const { ratingPoint, reviewComment } = req.body;
+
+  const result = await reviewsCollection.updateOne(
+    { _id: new ObjectId(id) },
+    {
+      $set: {
+        ratingPoint,
+        reviewComment,
+        reviewDate: new Date(),
+      },
+    }
+  );
+
+  res.send(result);
+});
      
      
     await client.db("admin").command({ ping: 1 });

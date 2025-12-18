@@ -488,7 +488,10 @@ async function run() {
         app.post("/reviews", async(req, res)=>{
           const reviewInfo = req.body;
           reviewInfo.reviewDate = new Date()
-          const existReviewForScholarship = await reviewsCollection.findOne({scholarshipId: reviewInfo.scholarshipId})
+          const existReviewForScholarship = await reviewsCollection.findOne({
+  scholarshipId: reviewInfo.scholarshipId,
+  userEmail: reviewInfo.userEmail,
+});
             if (existReviewForScholarship) {
               return res.status(409).send({
               message: "You have already reviewed this scholarship",
@@ -548,6 +551,67 @@ app.patch("/reviews/:id", async (req, res) => {
   );
 
   res.send(result);
+});
+
+// get all reviews
+app.get("/reviews", async (req, res) => {
+  try {
+    
+    const reviews = await reviewsCollection.find().toArray();
+    if (reviews.length === 0) return res.send([]);
+    const scholarshipIds = reviews.map(r =>new ObjectId(r.scholarshipId));
+    const scholarships = await scholarshipsCollection
+      .find({ _id: { $in: scholarshipIds } })
+      .project({ _id: 1, scholarshipName: 1 })
+      .toArray();
+    const reviewsWithNames = reviews.map(r => {
+      const scholarship = scholarships.find(
+        s => s._id.toString() === r.scholarshipId.toString()
+      );
+      return {
+        ...r,
+        scholarshipName: scholarship ? scholarship.scholarshipName : "",
+      };
+    });
+    res.send(reviewsWithNames);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Internal Server Error" });
+  }
+});
+
+app.get("/reviews/:id/all", async(req, res)=>{
+  const id = req.params.id;
+  const query = {scholarshipId: id}
+  const result = await reviewsCollection.find(query).toArray();
+  res.send(result)
+})
+
+app.get("/reviews/:scholarshipId/average", async (req, res) => {
+  const { scholarshipId } = req.params;
+
+  const result = await reviewsCollection.aggregate([
+    { $match: { scholarshipId } },
+    {
+      $group: {
+        _id: "$scholarshipId",
+        averageRating: { $avg: "$ratingPoint" },
+        totalReviews: { $sum: 1 },
+      },
+    },
+  ]).toArray();
+
+  if (!result.length) {
+    return res.send({
+      averageRating: 0,
+      totalReviews: 0,
+    });
+  }
+
+  res.send({
+    averageRating: Number(result[0].averageRating.toFixed(1)),
+    totalReviews: result[0].totalReviews,
+  });
 });
      
      

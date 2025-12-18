@@ -62,7 +62,13 @@ async function run() {
      const usersCollection  = database.collection('users');
      const scholarshipsCollection  = database.collection('scholarships');
      const applicationsCollection = database.collection('applications')
+    
      
+
+ 
+
+
+
       //$  users related apis
      // _________________________________________________________________________
     // 1. Save user
@@ -89,6 +95,7 @@ async function run() {
     if(filter){
         query.role = filter 
     }
+    
     const cursor = usersCollection.find(query);
     const result = await cursor.toArray()
     res.send(result)
@@ -115,6 +122,13 @@ async function run() {
     const result = await usersCollection.deleteOne(query)
     res.send(result)
    })
+  //  5. get role
+   app.get('/users/:email/role', async(req, res)=>{
+    const email = req.params.email;
+    const query = {email};
+    const user = await usersCollection.findOne(query);
+    res.send(user)
+  })
 
       //$ scholarships related apis
      //___________________________________________________________________________
@@ -326,7 +340,8 @@ async function run() {
       order = "desc",
       search = "",
       applicationStatus = "",
-      degree = ""  
+      degree = "" ,
+      email = ""
     } = req.query;
 
     limit = Number(limit);
@@ -341,6 +356,11 @@ async function run() {
     }
     if(degree){
         query.degree = degree
+    }
+    
+    if(email){
+      query.userEmail = email
+      console.log(email)
     }
 
     // TEXT SEARCH
@@ -394,7 +414,50 @@ async function run() {
           const result = await applicationsCollection.updateOne(query, updatedDoc)
           res.send(result)
         })
-    
+        // 3. my application 
+        app.get("/my-applications/:email", async (req, res) => {
+          try {
+            const email = req.params.email;
+            const result = await applicationsCollection.aggregate([
+              {
+                $match: {
+                  userEmail: email,
+                },
+              },
+              {
+                $addFields: {
+                  scholarshipObjectId: {
+                    $toObjectId: "$scholarshipId",
+                  },
+                },
+              },
+              {
+                $lookup: {
+                  from: "scholarships",
+                  localField: "scholarshipObjectId",
+                  foreignField: "_id",
+                  as: "scholarshipDetails",
+                },
+              },
+              {
+                $unwind: {
+                  path: "$scholarshipDetails",
+                  preserveNullAndEmptyArrays: true,
+                },
+              },
+              {
+                $project: {
+                  scholarshipObjectId: 0,
+                },
+              },
+            ]).toArray();
+            res.send(result);
+          } catch (error) {
+            console.log("API ERROR:", error);
+            res.status(500).send({ success: false, error: "Server error" });
+          }
+        });
+     
      
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");

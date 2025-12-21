@@ -1,19 +1,40 @@
 const express = require('express');
 const cors = require('cors');
-const ImageKit = require('@imagekit/nodejs');   
+const ImageKit = require('@imagekit/nodejs'); 
+const admin = require("firebase-admin");  
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
 const stripe = require('stripe')(process.env.STRIPE_SECRET)
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
 
 
 const app = express()
 const port = process.env.PORT || 3000;
 
 // middleware
-app.use(
-  cors()
-);
+app.use(cors());
 app.use(express.json())
+
+const verifyFirebaseToken = async(req, res, next)=>{
+   const token =  req.headers.authorization
+   if(!token){
+    return res.status(401).send({message:"unauthorize access"})
+   }
+   try{
+    const idToken = token.split(' ')[1]
+    const decoded = await admin.auth().verifyIdToken(idToken)
+    req.decoded_email = decoded.email
+   }catch(err){
+    return res.status(401).send({message: "unauthorized access"})
+   }
+next()
+}
 
 
 const imgkitClient = new ImageKit(
@@ -57,13 +78,34 @@ const client = new MongoClient(uri, {
 
 async function run() {
     try {
-      await client.connect();
+      // await client.connect();
      const database = client.db('scholar_stream');
      const usersCollection  = database.collection('users');
      const scholarshipsCollection  = database.collection('scholarships');
      const applicationsCollection = database.collection('applications')
      const reviewsCollection = database.collection('reviews')
+
+
+   
+    const verifyAdmin = async(req, res, next)=>{
+      const email = req.decoded_email;
+      const query = {email};
+      const user = await usersCollection.findOne(query);
+      if(!user || user.role !== 'admin'){
+        return res.status(403).send({message: "forbidden"})
+      }
+      next()
+    }
     
+     const verifyModerator = async(req, res, next)=>{
+      const email = req.decoded_email;
+      const query = {email};
+      const user = await usersCollection.findOne(query);
+      if(!user || user.role !== 'moderator'){
+        return res.status(403).send({message: "forbidden"})
+      }
+      next()
+    }
      
 
  
@@ -74,6 +116,7 @@ async function run() {
      // _________________________________________________________________________
     // 1. Save user
     app.post("/users", async(req, res)=>{
+     
         const userInfo = req.body
         userInfo.role = 'student';
         userInfo.createdAt = new Date()
@@ -86,7 +129,7 @@ async function run() {
         res.send(result)
     }) 
     // 2. get all users 
-    app.get('/users',  async(req,res)=>{
+    app.get('/users', verifyFirebaseToken, async(req,res)=>{
     const searchText = req.query.searchText;
     const filter = req.query.filter
     const query = {};
@@ -102,10 +145,10 @@ async function run() {
     res.send(result)
    })
    // 3. update user role
-   app.patch('/users/:id/role', async(req,res)=>{
+   app.patch('/users/:id/role',verifyFirebaseToken, verifyAdmin, async(req,res)=>{
     const id = req.params.id;
     const roleInfo = req.body
-    console.log(roleInfo)
+    
     const query = {_id: new ObjectId(id)}
     const updatedDoc = {
       $set:{
@@ -117,14 +160,14 @@ async function run() {
 
    })
    // 4. delete user
-   app.delete('/users/:id', async(req, res)=>{
+   app.delete('/users/:id', verifyFirebaseToken,verifyAdmin, async(req, res)=>{
     const id = req.params.id
     const query = {_id: new ObjectId(id)}
     const result = await usersCollection.deleteOne(query)
     res.send(result)
    })
   //  5. get role
-   app.get('/users/:email/role', async(req, res)=>{
+   app.get('/users/:email/role',verifyFirebaseToken, async(req, res)=>{
     const email = req.params.email;
     const query = {email};
     const user = await usersCollection.findOne(query);
@@ -134,7 +177,7 @@ async function run() {
       //$ scholarships related apis
      //___________________________________________________________________________
     // 1. Scholarship Save to Database
-    app.post('/scholarships', async(req,res)=>{
+    app.post('/scholarships',verifyFirebaseToken, verifyAdmin, async(req,res)=>{
         const scholarshipInfo = req.body
         scholarshipInfo.reviews = []
         scholarshipInfo.scholarshipPostDate = new Date()
@@ -145,13 +188,13 @@ async function run() {
     app.get("/scholarships", async (req, res) => {
   try {
     let {
-      limit = 12,
+      limit = 0,
       skip = 0,
-      sort = "createdAt",
-      order = "desc",
       search = "",
       category = "",
-      degree = ""  
+      degree = "",
+      sort = "scholarshipPostDate",
+      order = "desc",
     } = req.query;
 
     limit = Number(limit);
@@ -177,8 +220,7 @@ async function run() {
       ];
     }
 
-    // SORT
-    const sortOption = {};
+   const sortOption = {};
     sortOption[sort] = order === "asc" ? 1 : -1;
 
     // DATA FETCH
@@ -201,26 +243,26 @@ async function run() {
     });
 
   } catch (error) {
-    console.log("API ERROR:", error);
+    // console.log("API ERROR:", error);
     res.status(500).send({ success: false, error: "Server error" });
   }
         });  
     // 3. Scholarship Delete
-    app.delete("/scholarships/:id", async(req, res)=>{
+    app.delete("/scholarships/:id", verifyFirebaseToken, verifyAdmin, async(req, res)=>{
         const id = req.params.id;
         const query = {_id: new ObjectId(id)}
         const result = await scholarshipsCollection.deleteOne(query)
         res.send(result)
     })
     // 4. get one scholarship
-    app.get("/scholarships/:id", async(req, res)=>{
+    app.get("/scholarships/:id", verifyFirebaseToken, async(req, res)=>{
         const id = req.params.id;
         const query = {_id: new ObjectId(id)}
         const result = await scholarshipsCollection.findOne(query)
         res.send(result)
     })
     // 5. Update one scholarship 
-    app.patch("/scholarships/:id", async (req, res) => {
+    app.patch("/scholarships/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const data = req.body;   
        try {
@@ -245,13 +287,16 @@ async function run() {
 
     // paymet checkout session link
     //1. create payment session
-          app.post("/create-checkout-session", async(req, res)=>{
+    app.post("/create-checkout-session", verifyFirebaseToken, async(req, res)=>{
                const applicationInfo = req.body;
+               
                let applicationId = "";
                if(!applicationInfo._id){
                const userEmail = applicationInfo.userEmail;
+               
                const userQuery = {email: userEmail};
                const userResult = await usersCollection.findOne(userQuery);
+               
                applicationInfo.userId = userResult._id.toString();
                applicationInfo.userName = userResult.displayName;
                applicationInfo.applicationStatus = "pending";
@@ -348,13 +393,12 @@ async function run() {
 
          //$ application management
         // 1. applications get all from db
-    app.get("/applications", async (req, res) => {
+    app.get("/applications",verifyFirebaseToken,verifyModerator, async (req, res) => {
   try {
     let {
       limit = 12,
       skip = 0,
-      sort = "createdAt",
-      order = "desc",
+      
       search = "",
       applicationStatus = "",
       degree = "" ,
@@ -377,7 +421,7 @@ async function run() {
     
     if(email){
       query.userEmail = email
-      console.log(email)
+      // console.log(email)
     }
 
     // TEXT SEARCH
@@ -388,14 +432,12 @@ async function run() {
       ];
     }
 
-    // SORT
-    const sortOption = {};
-    sortOption[sort] = order === "asc" ? 1 : -1;
+  
 
     // DATA FETCH
     const data = await applicationsCollection
       .find(query)
-      .sort(sortOption)
+      
       .skip(skip)
       .limit(limit)
       .toArray();
@@ -412,13 +454,13 @@ async function run() {
     });
 
   } catch (error) {
-    console.log("API ERROR:", error);
+    // console.log("API ERROR:", error);
     res.status(500).send({ success: false, error: "Server error" });
   }
         });
 
         // 2. Update application
-        app.patch("/applications/:id", async(req, res)=>{
+        app.patch("/applications/:id",verifyFirebaseToken, async(req, res)=>{
           const id = req.params.id;
           const updateInfo = req.body;
           const query = {_id: new ObjectId(id)}
@@ -432,7 +474,7 @@ async function run() {
           res.send(result)
         })
         // 3. my application 
-        app.get("/my-applications/:email", async (req, res) => {
+        app.get("/my-applications/:email",verifyFirebaseToken, async (req, res) => {
           try {
             const email = req.params.email;
             const result = await applicationsCollection.aggregate([
@@ -470,12 +512,12 @@ async function run() {
             ]).toArray();
             res.send(result);
           } catch (error) {
-            console.log("API ERROR:", error);
+            // console.log("API ERROR:", error);
             res.status(500).send({ success: false, error: "Server error" });
           }
         });
         // 4. delete my applications
-        app.delete("/my-applications/:id", async(req,res)=>{
+        app.delete("/my-applications/:id",verifyFirebaseToken, async(req,res)=>{
           const id = req.params.id;
         const query = {_id: new ObjectId(id)}
         const result = await applicationsCollection.deleteOne(query)
@@ -485,7 +527,7 @@ async function run() {
 
         // ________________________________________________
         // submit review
-        app.post("/reviews", async(req, res)=>{
+        app.post("/reviews",verifyFirebaseToken, async(req, res)=>{
           const reviewInfo = req.body;
           reviewInfo.reviewDate = new Date()
           const existReviewForScholarship = await reviewsCollection.findOne({
@@ -503,7 +545,7 @@ async function run() {
         // get all review
 
 
-app.get("/reviews/:email", async (req, res) => {
+app.get("/reviews/:email",verifyFirebaseToken, async (req, res) => {
   try {
     const email = req.params.email;
     const reviews = await reviewsCollection.find({ userEmail: email }).toArray();
@@ -529,13 +571,13 @@ app.get("/reviews/:email", async (req, res) => {
   }
 });
 // delete 
-app.delete("/reviews/:id", async(req, res)=>{
+app.delete("/reviews/:id",verifyFirebaseToken, async(req, res)=>{
   const id = req.params.id;
   const query = {_id: new ObjectId(id)}
   const result = await reviewsCollection.deleteOne(query)
   res.send(result)
 })
-app.patch("/reviews/:id", async (req, res) => {
+app.patch("/reviews/:id",verifyFirebaseToken, async (req, res) => {
   const { id } = req.params;
   const { ratingPoint, reviewComment } = req.body;
 
@@ -554,7 +596,7 @@ app.patch("/reviews/:id", async (req, res) => {
 });
 
 // get all reviews
-app.get("/reviews", async (req, res) => {
+app.get("/reviews",verifyFirebaseToken, verifyModerator, async (req, res) => {
   try {
     
     const reviews = await reviewsCollection.find().toArray();
@@ -613,10 +655,65 @@ app.get("/reviews/:scholarshipId/average", async (req, res) => {
     totalReviews: result[0].totalReviews,
   });
 });
+
+// analytics
+app.get("/analytics/summary",verifyFirebaseToken, async (req, res) => {
+  const totalUsers = await usersCollection.countDocuments();
+  const totalScholarships = await scholarshipsCollection.countDocuments();
+
+  const feesAgg = await applicationsCollection.aggregate([
+    {
+      $group: {
+        _id: null,
+        totalFees: {
+          $sum: { $add: ["$applicationFees", "$serviceCharge"] },
+        },
+      },
+    },
+  ]).toArray();
+
+  res.send({
+    totalUsers,
+    totalScholarships,
+    totalFeesCollected: feesAgg[0]?.totalFees || 0,
+  });
+});
+// analytics to show chart
+app.get("/analytics/applications-by-category",  async (req, res) => {
+  const result = await applicationsCollection.aggregate([
+    {
+      $group: {
+        _id: "$scholarshipCategory",
+        count: { $sum: 1 },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        category: "$_id",
+        applications: "$count",
+      },
+    },
+  ]).toArray();
+
+  res.send(result);
+});
+
+app.get("/top-scholarships", async (req, res) => {
+  
+    const result = await scholarshipsCollection
+      .find()
+      .sort({ applicationFees: 1 })
+      .limit(6)
+      .toArray();
+    res.send(result);
+  
+});
+
+
      
-     
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     
   }

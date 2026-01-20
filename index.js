@@ -261,6 +261,32 @@ async function run() {
         const result = await scholarshipsCollection.findOne(query)
         res.send(result)
     })
+    // 4.1 Get related scholarships
+    app.get("/scholarships/:id/related", verifyFirebaseToken, async(req, res)=>{
+        try {
+            const id = req.params.id;
+            const scholarship = await scholarshipsCollection.findOne({_id: new ObjectId(id)});
+            
+            if (!scholarship) {
+                return res.status(404).send({ message: "Scholarship not found" });
+            }
+            
+            // Find related scholarships based on degree only
+            const relatedQuery = {
+                _id: { $ne: new ObjectId(id) },
+                degree: scholarship.degree
+            };
+            
+            const relatedScholarships = await scholarshipsCollection
+                .find(relatedQuery)
+                .limit(4)
+                .toArray();
+            
+            res.send(relatedScholarships);
+        } catch (error) {
+            res.status(500).send({ message: "Server error", error: error.message });
+        }
+    })
     // 5. Update one scholarship 
     app.patch("/scholarships/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
